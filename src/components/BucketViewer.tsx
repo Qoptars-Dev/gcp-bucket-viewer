@@ -52,37 +52,103 @@ const FolderCard: React.FC<{
   </button>
 ));
 
+// Add new Lightbox component
+const Lightbox: React.FC<{
+  imageUrl: string;
+  onClose: () => void;
+}> = ({ imageUrl, onClose }) => {
+  console.log('Lightbox rendered with URL:', imageUrl);
+
+  useEffect(() => {
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center"
+      onClick={() => {
+        console.log('Lightbox background clicked.')
+        onClose();
+      }}
+    >
+      <button 
+        className="absolute top-4 right-4 text-white text-xl p-2"
+        onClick={(e) => {
+          e.stopPropagation();
+          console.log('Close button clicked');
+          onClose();
+        }}
+      >
+        ✕
+      </button>
+      <img 
+        src={imageUrl} 
+        alt="Fullscreen view"
+        className="max-h-[90vh] max-w-[90vw] object-contain"
+        onClick={(e) => {
+          e.stopPropagation();
+          console.log('Image clicked in lightbox');
+        }}
+      />
+    </div>
+  );
+};
+
+// Modify FileCard component to handle lightbox
+// First, let's modify the FileCard component to add logging
 const FileCard: React.FC<{
   file: FileItem;
-}> = React.memo(({ file }) => (
-  <div className="relative group">
-    {file.type === 'image' ? (
-      <div className="aspect-square">
-        <LazyImage
-          src={file.url}
-          alt={file.name}
-          className="rounded"
-        />
-      </div>
-    ) : (
-      <div className="aspect-square border rounded flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <FileIcon extension={file.extension} />
-          <p className="mt-2 text-sm">{file.name}</p>
+  onImageClick: (url: string) => void;
+}> = React.memo(({ file, onImageClick }) => {
+  const handleImageClick = () => {
+    console.log('Image clicked:', file.url);
+    onImageClick(file.url);
+  };
+
+  return (
+    <div className="relative group">
+      {file.type === 'image' ? (
+        <div 
+          className="aspect-square cursor-pointer"
+          onClick={handleImageClick}
+        >
+          <LazyImage
+            src={file.url}
+            alt={file.name}
+            className="rounded"
+          />
+          <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('Download clicked');
+                handleImageClick();
+              }}
+              className="text-white bg-blue-500 px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+            >
+              Download
+            </button>
+          </div>
         </div>
-      </div>
-    )}
-    <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-      <a
-        href={file.url}
-        download={file.name}
-        className="text-white bg-blue-500 px-4 py-2 rounded hover:bg-blue-600 transition-colors"
-      >
-        Download
-      </a>
+      ) : (
+        // Non-image file rendering remains the same
+        <div className="aspect-square border rounded flex items-center justify-center bg-gray-50">
+          <div className="text-center">
+            <FileIcon extension={file.extension} />
+            <p className="mt-2 text-sm">{file.name}</p>
+          </div>
+        </div>
+      )}
     </div>
-  </div>
-));
+  );
+});
+
 
 const BucketViewer: React.FC = () => {
   const [rootFolder, setRootFolder] = useState<FolderItem | null>(null);
@@ -90,6 +156,13 @@ const BucketViewer: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  const handleImageClick = useCallback((url: string) => {
+    console.log('Setting lightbox image:', url);
+    setLightboxImage(url);
+  }, []);
 
   const getFileType = useCallback((fileName: string): 'image' | 'file' => {
     const extension = fileName.split('.').pop()?.toLowerCase() || '';
@@ -259,7 +332,7 @@ const BucketViewer: React.FC = () => {
           <h2 className="text-lg font-semibold mb-2">Files</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {paginatedFiles.map(file => (
-              <FileCard key={file.url} file={file} />
+              <FileCard key={file.url} file={file} onImageClick={handleImageClick}/>
             ))}
           </div>
 
@@ -285,6 +358,17 @@ const BucketViewer: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Add Lightbox */}
+      {lightboxImage && (
+        <Lightbox 
+          imageUrl={lightboxImage} 
+          onClose={() => {
+            console.log('Closing lightbox');
+            setLightboxImage(null);
+          }}
+        />
       )}
 
       {!currentFolder?.subfolders.length && !paginatedFiles.length && (
