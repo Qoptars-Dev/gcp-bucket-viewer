@@ -55,9 +55,9 @@ const FolderCard: React.FC<{
 // Add new Lightbox component
 const Lightbox: React.FC<{
   imageUrl: string;
+  fileName: string;
   onClose: () => void;
-}> = ({ imageUrl, onClose }) => {
-  console.log('Lightbox rendered with URL:', imageUrl);
+}> = ({ imageUrl, fileName, onClose }) => {
 
   useEffect(() => {
     const handleEsc = (event: KeyboardEvent) => {
@@ -73,29 +73,35 @@ const Lightbox: React.FC<{
     <div 
       className="fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center"
       onClick={() => {
-        console.log('Lightbox background clicked.')
         onClose();
       }}
     >
-      <button 
-        className="absolute top-4 right-4 text-white text-xl p-2"
-        onClick={(e) => {
-          e.stopPropagation();
-          console.log('Close button clicked');
-          onClose();
-        }}
+<div 
+        className="relative max-h-[90vh] max-w-[90vw]"
+        onClick={(e) => e.stopPropagation()}
       >
-        ✕
-      </button>
-      <img 
-        src={imageUrl} 
-        alt="Fullscreen view"
-        className="max-h-[90vh] max-w-[90vw] object-contain"
-        onClick={(e) => {
-          e.stopPropagation();
-          console.log('Image clicked in lightbox');
-        }}
-      />
+        <img 
+          src={imageUrl} 
+          alt="Fullscreen view"
+          className="max-h-[90vh] max-w-[90vw] object-contain"
+        />
+        <div className="absolute top-0 right-0 flex gap-2 m-4">
+          <a
+            href={imageUrl}
+            download={fileName}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Download
+          </a>
+          <button 
+            className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition-colors"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -107,7 +113,7 @@ const FileCard: React.FC<{
   onImageClick: (url: string) => void;
 }> = React.memo(({ file, onImageClick }) => {
   const handleImageClick = () => {
-    console.log('Image clicked:', file.url);
+    // console.log('Image clicked:', file.url);
     onImageClick(file.url);
   };
 
@@ -123,25 +129,24 @@ const FileCard: React.FC<{
             alt={file.name}
             className="rounded"
           />
-          <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log('Download clicked');
-                handleImageClick();
-              }}
-              className="text-white bg-blue-500 px-4 py-2 rounded hover:bg-blue-600 transition-colors"
-            >
-              Download
-            </button>
-          </div>
+        <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+          <span className="text-white">Click to view</span>
+        </div>
         </div>
       ) : (
         // Non-image file rendering remains the same
         <div className="aspect-square border rounded flex items-center justify-center bg-gray-50">
-          <div className="text-center">
+          <div className="text-center flex">
             <FileIcon extension={file.extension} />
             <p className="mt-2 text-sm">{file.name}</p>
+            <a
+              href={file.url}
+              download={file.name}
+              className="absolute bottom-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors text-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Download CSV
+            </a>
           </div>
         </div>
       )}
@@ -157,11 +162,13 @@ const BucketViewer: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
 
-  const handleImageClick = useCallback((url: string) => {
-    console.log('Setting lightbox image:', url);
-    setLightboxImage(url);
+  // const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  const handleImageClick = useCallback((file: FileItem) => {
+    // setLightboxImage(url);
+    setSelectedFile(file)
   }, []);
 
   const getFileType = useCallback((fileName: string): 'image' | 'file' => {
@@ -332,7 +339,7 @@ const BucketViewer: React.FC = () => {
           <h2 className="text-lg font-semibold mb-2">Files</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {paginatedFiles.map(file => (
-              <FileCard key={file.url} file={file} onImageClick={handleImageClick}/>
+              <FileCard key={file.url} file={file} onImageClick={() => handleImageClick(file)}/>
             ))}
           </div>
 
@@ -361,12 +368,13 @@ const BucketViewer: React.FC = () => {
       )}
 
       {/* Add Lightbox */}
-      {lightboxImage && (
+      {selectedFile && (
         <Lightbox 
-          imageUrl={lightboxImage} 
+          imageUrl={selectedFile.url} 
+          fileName={selectedFile.name}
           onClose={() => {
-            console.log('Closing lightbox');
-            setLightboxImage(null);
+            // setLightboxImage(null);
+            setSelectedFile(null)
           }}
         />
       )}
@@ -374,6 +382,8 @@ const BucketViewer: React.FC = () => {
       {!currentFolder?.subfolders.length && !paginatedFiles.length && (
         <p className="text-gray-500 text-center py-8">This folder is empty.</p>
       )}
+
+      <p className='text-xs font-light text-gray-600'>* Predicted images are not accurate yet. We are extremely sorry for the inconvenience caused. We will sort it out as soon as possible.</p>
     </div>
   );
 };
