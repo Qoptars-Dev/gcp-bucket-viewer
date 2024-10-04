@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { BUCKET_URL, fetchBucketContents } from '../gcpService';
+import LazyImage from './LazyImage';
 
 const ITEMS_PER_PAGE = 9;
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
@@ -19,6 +20,70 @@ interface FolderItem {
   subfolders: FolderItem[];
 }
 
+const FileIcon: React.FC<{ extension: string }> = React.memo(({ extension }) => {
+  const iconMap: { [key: string]: string } = {
+    pdf: '📄',
+    csv: '📊',
+    xlsx: '📊',
+    docx: '📝',
+    txt: '📄',
+    image: '🖼️',
+  };
+  return <span>{iconMap[IMAGE_EXTENSIONS.includes(extension) ? 'image' : extension] || '📄'}</span>;
+});
+
+const FolderCard: React.FC<{
+  folder: FolderItem;
+  onClick: () => void;
+}> = React.memo(({ folder, onClick }) => (
+  <button
+    onClick={onClick}
+    className="p-4 border rounded hover:bg-gray-50 transition-colors text-left"
+  >
+    <div className="flex items-center">
+      <span className="mr-2">📁</span>
+      <div>
+        <h3 className="font-medium">{folder.name}</h3>
+        <p className="text-sm text-gray-500">
+          {folder.files.length} files, {folder.subfolders.length} folders
+        </p>
+      </div>
+    </div>
+  </button>
+));
+
+const FileCard: React.FC<{
+  file: FileItem;
+}> = React.memo(({ file }) => (
+  <div className="relative group">
+    {file.type === 'image' ? (
+      <div className="aspect-square">
+        <LazyImage
+          src={file.url}
+          alt={file.name}
+          className="rounded"
+        />
+      </div>
+    ) : (
+      <div className="aspect-square border rounded flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <FileIcon extension={file.extension} />
+          <p className="mt-2 text-sm">{file.name}</p>
+        </div>
+      </div>
+    )}
+    <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+      <a
+        href={file.url}
+        download={file.name}
+        className="text-white bg-blue-500 px-4 py-2 rounded hover:bg-blue-600 transition-colors"
+      >
+        Download
+      </a>
+    </div>
+  </div>
+));
+
 const BucketViewer: React.FC = () => {
   const [rootFolder, setRootFolder] = useState<FolderItem | null>(null);
   const [currentPath, setCurrentPath] = useState<string[]>([]);
@@ -26,16 +91,16 @@ const BucketViewer: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const getFileType = (fileName: string): 'image' | 'file' => {
+  const getFileType = useCallback((fileName: string): 'image' | 'file' => {
     const extension = fileName.split('.').pop()?.toLowerCase() || '';
     return IMAGE_EXTENSIONS.includes(extension) ? 'image' : 'file';
-  };
+  }, []);
 
-  const getFileExtension = (fileName: string): string => {
+  const getFileExtension = useCallback((fileName: string): string => {
     return fileName.split('.').pop()?.toLowerCase() || '';
-  };
+  }, []);
 
-  const buildFolderStructure = (files: string[]): FolderItem => {
+  const buildFolderStructure = useCallback((files: string[]): FolderItem => {
     const root: FolderItem = {
       name: 'root',
       path: '',
@@ -43,16 +108,22 @@ const BucketViewer: React.FC = () => {
       subfolders: []
     };
 
+    const folderCache = new Map<string, FolderItem>();
+    folderCache.set('', root);
+
     files.forEach(filePath => {
       const parts = filePath.split('/').filter(part => part);
-      let currentFolder = root;
+      let currentPath = '';
 
       parts.forEach((part, index) => {
-        if (index === parts.length - 1) {
-          // This is a file
+        const isLastPart = index === parts.length - 1;
+        const newPath = currentPath ? `${currentPath}/${part}` : part;
+
+        if (isLastPart) {
           const extension = getFileExtension(part);
           if (DOWNLOADABLE_EXTENSIONS.includes(extension)) {
-            currentFolder.files.push({
+            const parentFolder = folderCache.get(currentPath)!;
+            parentFolder.files.push({
               name: part,
               url: `${BUCKET_URL}/${filePath}`,
               type: getFileType(part),
@@ -60,24 +131,24 @@ const BucketViewer: React.FC = () => {
             });
           }
         } else {
-          // This is a folder
-          let subfolder = currentFolder.subfolders.find(f => f.name === part);
-          if (!subfolder) {
-            subfolder = {
+          if (!folderCache.has(newPath)) {
+            const newFolder: FolderItem = {
               name: part,
-              path: `${currentFolder.path}${currentFolder.path ? '/' : ''}${part}`,
+              path: newPath,
               files: [],
               subfolders: []
             };
-            currentFolder.subfolders.push(subfolder);
+            const parentFolder = folderCache.get(currentPath)!;
+            parentFolder.subfolders.push(newFolder);
+            folderCache.set(newPath, newFolder);
           }
-          currentFolder = subfolder;
+          currentPath = newPath;
         }
       });
     });
 
     return root;
-  };
+  }, [getFileExtension, getFileType]);
 
   useEffect(() => {
     const getBucketContents = async () => {
@@ -94,47 +165,38 @@ const BucketViewer: React.FC = () => {
         setError(null);
       } catch (error) {
         setError("Failed to load bucket contents");
-        console.log(error)
       } finally {
         setLoading(false);
       }
     };
 
     getBucketContents();
+  }, [buildFolderStructure]);
+
+  const currentFolder = useMemo(() => {
+    if (!rootFolder) return null;
+    return currentPath.reduce((folder, pathPart) => {
+      return folder?.subfolders.find(f => f.name === pathPart) || null;
+    }, rootFolder);
+  }, [rootFolder, currentPath]);
+
+  const { paginatedFiles, totalPages } = useMemo(() => {
+    const files = currentFolder?.files || [];
+    return {
+      paginatedFiles: files.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
+      totalPages: Math.ceil(files.length / ITEMS_PER_PAGE)
+    };
+  }, [currentFolder, currentPage]);
+
+  const handleFolderClick = useCallback((folderName: string) => {
+    setCurrentPath(prev => [...prev, folderName]);
+    setCurrentPage(1);
   }, []);
 
-  const getCurrentFolder = (): FolderItem | null => {
-    if (!rootFolder) return null;
-    let current = rootFolder;
-    for (const pathPart of currentPath) {
-      const subfolder = current.subfolders.find(f => f.name === pathPart);
-      if (!subfolder) return null;
-      current = subfolder;
-    }
-    return current;
-  };
-
-  const currentFolder = getCurrentFolder();
-  const currentFiles = currentFolder?.files || [];
-  const currentSubfolders = currentFolder?.subfolders || [];
-  
-  const paginatedFiles = currentFiles.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
-  const totalPages = Math.ceil(currentFiles.length / ITEMS_PER_PAGE);
-
-  const FileIcon: React.FC<{ extension: string }> = ({ extension }) => {
-    const iconMap: { [key: string]: string } = {
-      pdf: '📄',
-      csv: '📊',
-      xlsx: '📊',
-      docx: '📝',
-      txt: '📄',
-      image: '🖼️',
-    };
-    return <span>{iconMap[IMAGE_EXTENSIONS.includes(extension) ? 'image' : extension] || '📄'}</span>;
-  };
+  const handlePathClick = useCallback((index: number) => {
+    setCurrentPath(prev => prev.slice(0, index));
+    setCurrentPage(1);
+  }, []);
 
   if (loading) {
     return <div className="flex justify-center items-center h-64">
@@ -154,7 +216,7 @@ const BucketViewer: React.FC = () => {
       <div className="flex flex-wrap items-center space-x-2 mb-4 text-sm text-gray-600">
         <span 
           className="cursor-pointer hover:text-blue-500"
-          onClick={() => setCurrentPath([])}
+          onClick={() => handlePathClick(-1)}
         >
           Root
         </span>
@@ -163,7 +225,7 @@ const BucketViewer: React.FC = () => {
             <span>/</span>
             <span 
               className="cursor-pointer hover:text-blue-500"
-              onClick={() => setCurrentPath(currentPath.slice(0, index + 1))}
+              onClick={() => handlePathClick(index)}
             >
               {path}
             </span>
@@ -172,33 +234,20 @@ const BucketViewer: React.FC = () => {
       </div>
 
       {/* Subfolders */}
-      {currentSubfolders.length > 0 && (
+      {currentFolder?.subfolders.length ? (
         <div className="mb-8">
           <h2 className="text-lg font-semibold mb-2">Folders</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {currentSubfolders.map(folder => (
-              <button
+            {currentFolder.subfolders.map(folder => (
+              <FolderCard
                 key={folder.path}
-                onClick={() => {
-                  setCurrentPath([...currentPath, folder.name]);
-                  setCurrentPage(1);
-                }}
-                className="p-4 border rounded hover:bg-gray-50 transition-colors text-left"
-              >
-                <div className="flex items-center">
-                  <span className="mr-2">📁</span>
-                  <div>
-                    <h3 className="font-medium">{folder.name}</h3>
-                    <p className="text-sm text-gray-500">
-                      {folder.files.length} files, {folder.subfolders.length} folders
-                    </p>
-                  </div>
-                </div>
-              </button>
+                folder={folder}
+                onClick={() => handleFolderClick(folder.name)}
+              />
             ))}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Files */}
       {paginatedFiles.length > 0 && (
@@ -206,33 +255,7 @@ const BucketViewer: React.FC = () => {
           <h2 className="text-lg font-semibold mb-2">Files</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {paginatedFiles.map(file => (
-              <div key={file.url} className="relative group">
-                {file.type === 'image' ? (
-                  <div className="aspect-square">
-                    <img
-                      src={file.url}
-                      alt={file.name}
-                      className="w-full h-full object-cover rounded"
-                    />
-                  </div>
-                ) : (
-                  <div className="aspect-square border rounded flex items-center justify-center bg-gray-50">
-                    <div className="text-center">
-                      <FileIcon extension={file.extension} />
-                      <p className="mt-2 text-sm">{file.name}</p>
-                    </div>
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-                  <a
-                    href={file.url}
-                    download={file.name}
-                    className="text-white bg-blue-500 px-4 py-2 rounded hover:bg-blue-600 transition-colors"
-                  >
-                    Download
-                  </a>
-                </div>
-              </div>
+              <FileCard key={file.url} file={file} />
             ))}
           </div>
 
@@ -260,7 +283,7 @@ const BucketViewer: React.FC = () => {
         </div>
       )}
 
-      {currentSubfolders.length === 0 && paginatedFiles.length === 0 && (
+      {!currentFolder?.subfolders.length && !paginatedFiles.length && (
         <p className="text-gray-500 text-center py-8">This folder is empty.</p>
       )}
     </div>
