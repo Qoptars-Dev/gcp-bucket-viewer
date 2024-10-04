@@ -164,7 +164,7 @@ const BucketViewer: React.FC = () => {
         setRootFolder(folderStructure);
         setError(null);
       } catch (error) {
-        setError("Failed to load bucket contents");
+        setError(`Failed to load bucket contents: ${error}`);
       } finally {
         setLoading(false);
       }
@@ -175,13 +175,17 @@ const BucketViewer: React.FC = () => {
 
   const currentFolder = useMemo(() => {
     if (!rootFolder) return null;
-    return currentPath.reduce((folder, pathPart) => {
+    return currentPath.reduce<FolderItem | null>((folder, pathPart) => {
       return folder?.subfolders.find(f => f.name === pathPart) || null;
     }, rootFolder);
   }, [rootFolder, currentPath]);
 
   const { paginatedFiles, totalPages } = useMemo(() => {
-    const files = currentFolder?.files || [];
+    if (!currentFolder) {
+      return { paginatedFiles: [], totalPages: 0 };  // Return empty if currentFolder is null
+    }
+  
+    const files = currentFolder.files || [];
     return {
       paginatedFiles: files.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
       totalPages: Math.ceil(files.length / ITEMS_PER_PAGE)
